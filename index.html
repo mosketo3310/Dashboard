@@ -808,6 +808,20 @@ window.addEventListener('load', () => {
   const now = new Date();
   document.getElementById('filter-month').value = now.getMonth() + 1;
 });
+  supabase
+  .channel('expenses')
+  .on(
+    'postgres_changes',
+    {
+      event: '*',
+      schema: 'public',
+      table: 'expenses'
+    },
+    () => {
+      loadData();
+    }
+  )
+  .subscribe();
 </script>
 </body>
 </html>
