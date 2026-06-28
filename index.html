@@ -514,7 +514,33 @@ async function connect() {
   }
 }
 
-// ── Realtime ───────────────────────────────────────────────────────────
+// ── Polling (แทน Realtime ที่ไม่เสถียรบน free tier) ──────────────────
+let pollTimer = null;
+let lastRowCount = 0;
+let lastMaxId = 0;
+
+async function startPolling() {
+  if (pollTimer) clearInterval(pollTimer);
+  pollTimer = setInterval(async () => {
+    try {
+      // ดึงแค่ max id + count เพื่อเช็คว่ามีข้อมูลใหม่ไหม ประหยัด bandwidth
+      const rows = await sbFetch('expenses?select=id&order=id.desc&limit=1');
+      const newMaxId = rows && rows.length ? rows[0].id : 0;
+      if (newMaxId !== lastMaxId) {
+        lastMaxId = newMaxId;
+        loadData();
+        if (newMaxId > lastMaxId) toast('🔄 อัปเดตข้อมูลแล้ว');
+      }
+    } catch(e) { console.log('Poll error:', e.message); }
+  }, 5000);
+
+  const dot   = document.getElementById('rt-dot');
+  const label = document.getElementById('rt-label');
+  dot.classList.add('live');
+  label.textContent = 'Auto-refresh ทุก 5 วิ';
+}
+
+// ── Realtime (ลองก่อน ถ้าไม่ได้ใช้ polling แทน) ──────────────────────
 let reconnectTimer = null;
 
 function setupRealtime() {
@@ -535,6 +561,8 @@ function setupRealtime() {
       { event: '*', schema: 'public' },
       (payload) => {
         console.log('Realtime event:', payload.eventType, payload);
+        // mark ว่า Realtime ทำงานได้จริง
+        if (realtimeChannel._rtWorking) realtimeChannel._rtWorking();
         if (payload.table === 'expenses') {
           loadData();
           toast('🔄 อัปเดตข้อมูลแล้ว');
@@ -547,14 +575,25 @@ function setupRealtime() {
         dot.classList.add('live');
         label.textContent = 'Realtime เชื่อมต่อแล้ว';
         if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+        // ถ้า Realtime เชื่อมต่อได้ ให้หยุด polling
+        if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+        // ทดสอบว่า event มาจริงไหมใน 15 วิ ถ้าไม่มาให้ใช้ polling แทน
+        let rtWorking = false;
+        const rtTest = setTimeout(() => {
+          if (!rtWorking) {
+            console.log('Realtime ไม่ส่ง event — เปลี่ยนไปใช้ polling แทน');
+            startPolling();
+          }
+        }, 15000);
+        // mark ว่า Realtime ทำงานได้เมื่อได้รับ event แรก
+        realtimeChannel._rtWorking = () => { rtWorking = true; clearTimeout(rtTest); };
       } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
         dot.classList.remove('live');
-        label.textContent = 'Realtime หลุด — กำลัง reconnect...';
-        console.log('Reconnecting in 3s...');
-        reconnectTimer = setTimeout(() => setupRealtime(), 3000);
+        label.textContent = 'ใช้ polling แทน...';
+        startPolling();
       } else {
         dot.classList.remove('live');
-        label.textContent = 'กำลังเชื่อมต่อ Realtime...';
+        label.textContent = 'กำลังเชื่อมต่อ...';
       }
     });
 }
