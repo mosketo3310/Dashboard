@@ -527,19 +527,22 @@ function setupRealtime() {
   const dot   = document.getElementById('rt-dot');
   const label = document.getElementById('rt-label');
 
+  // ลอง subscribe แบบ schema-level (ไม่ระบุ table) เพื่อรับทุก event ใน public schema
   realtimeChannel = supabaseClient
-    .channel('expenses-changes-' + Date.now())  // ชื่อใหม่ทุกครั้งเพื่อไม่ชน cache
+    .channel('db-changes-' + Date.now())
     .on(
       'postgres_changes',
-      { event: '*', schema: 'public', table: 'expenses' },
+      { event: '*', schema: 'public' },
       (payload) => {
         console.log('Realtime event:', payload.eventType, payload);
-        loadData();
-        toast('🔄 อัปเดตข้อมูลแล้ว');
+        if (payload.table === 'expenses') {
+          loadData();
+          toast('🔄 อัปเดตข้อมูลแล้ว');
+        }
       }
     )
-    .subscribe((status) => {
-      console.log('Realtime status:', status);
+    .subscribe((status, err) => {
+      console.log('Realtime status:', status, err || '');
       if (status === 'SUBSCRIBED') {
         dot.classList.add('live');
         label.textContent = 'Realtime เชื่อมต่อแล้ว';
@@ -547,7 +550,7 @@ function setupRealtime() {
       } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
         dot.classList.remove('live');
         label.textContent = 'Realtime หลุด — กำลัง reconnect...';
-        // reconnect อัตโนมัติใน 3 วินาที
+        console.log('Reconnecting in 3s...');
         reconnectTimer = setTimeout(() => setupRealtime(), 3000);
       } else {
         dot.classList.remove('live');
