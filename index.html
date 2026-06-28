@@ -515,14 +515,20 @@ async function connect() {
 }
 
 // ── Realtime ───────────────────────────────────────────────────────────
+let reconnectTimer = null;
+
 function setupRealtime() {
-  // ยกเลิก channel เก่าถ้ามี
   if (realtimeChannel) {
     supabaseClient.removeChannel(realtimeChannel);
+    realtimeChannel = null;
   }
+  if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+
+  const dot   = document.getElementById('rt-dot');
+  const label = document.getElementById('rt-label');
 
   realtimeChannel = supabaseClient
-    .channel('expenses-changes')
+    .channel('expenses-changes-' + Date.now())  // ชื่อใหม่ทุกครั้งเพื่อไม่ชน cache
     .on(
       'postgres_changes',
       { event: '*', schema: 'public', table: 'expenses' },
@@ -533,20 +539,29 @@ function setupRealtime() {
       }
     )
     .subscribe((status) => {
-      const dot = document.getElementById('rt-dot');
-      const label = document.getElementById('rt-label');
+      console.log('Realtime status:', status);
       if (status === 'SUBSCRIBED') {
         dot.classList.add('live');
         label.textContent = 'Realtime เชื่อมต่อแล้ว';
-      } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+        if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+      } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
         dot.classList.remove('live');
-        label.textContent = 'Realtime ขาดการเชื่อมต่อ';
+        label.textContent = 'Realtime หลุด — กำลัง reconnect...';
+        // reconnect อัตโนมัติใน 3 วินาที
+        reconnectTimer = setTimeout(() => setupRealtime(), 3000);
       } else {
         dot.classList.remove('live');
         label.textContent = 'กำลังเชื่อมต่อ Realtime...';
       }
     });
 }
+
+// polling สำรอง: refresh ทุก 30 วินาที กรณี Realtime หลุดนานๆ
+setInterval(() => {
+  if (!document.getElementById('rt-dot').classList.contains('live')) {
+    loadData();
+  }
+}, 30000);
 
 // ── Filters ────────────────────────────────────────────────────────────
 function initYearFilter() {
